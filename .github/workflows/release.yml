@@ -1,0 +1,220 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 当推送版本标签时触发（如 v1.0.0）
+  workflow_dispatch:  # 允许手动触发
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: MyHS.exe
+            asset_name: MyHS-windows-x64.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: MyHS
+            asset_name: MyHS-linux-x64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: MyHS
+            asset_name: MyHS-macos-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: MyHS
+            asset_name: MyHS-macos-arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.target }}
+        override: true
+        profile: minimal
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-index-
+
+    - name: Cache target directory
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-${{ matrix.target }}-target-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.target }}-target-
+
+    - name: Build release binary
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --release --target ${{ matrix.target }}
+
+    - name: Strip binary (Linux and macOS)
+      if: matrix.os != 'windows-latest'
+      run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+    - name: Prepare binary for upload
+      shell: bash
+      run: |
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+        else
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+          chmod +x ${{ matrix.asset_name }}
+        fi
+
+    - name: Upload binary as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.asset_name }}
+        path: ${{ matrix.asset_name }}
+
+  create-release:
+    name: Create Release
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: ./artifacts
+
+    - name: Display structure of downloaded files
+      run: ls -la ./artifacts/
+
+    - name: Get tag name
+      id: tag_name
+      run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+        echo "## 🚀 MyHS ${{ steps.tag_name.outputs.TAG_NAME }}" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "### ✨ 新功能" >> $GITHUB_OUTPUT
+        echo "- 高性能HTTP文件服务器" >> $GITHUB_OUTPUT
+        echo "- 类似Python http.server的功能体验" >> $GITHUB_OUTPUT
+        echo "- 支持目录浏览和文件下载" >> $GITHUB_OUTPUT
+        echo "- 内置安全防护和CORS支持" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "### 📦 支持平台" >> $GITHUB_OUTPUT
+        echo "- Windows (x64)" >> $GITHUB_OUTPUT
+        echo "- Linux (x64)" >> $GITHUB_OUTPUT
+        echo "- macOS (x64 & ARM64)" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "### 🔧 使用方法" >> $GITHUB_OUTPUT
+        echo "\`\`\`bash" >> $GITHUB_OUTPUT
+        echo "# 下载对应平台的二进制文件" >> $GITHUB_OUTPUT
+        echo "# 在当前目录启动服务器" >> $GITHUB_OUTPUT
+        echo "./MyHS" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "# 指定目录和端口" >> $GITHUB_OUTPUT
+        echo "./MyHS /path/to/serve 8080" >> $GITHUB_OUTPUT
+        echo "\`\`\`" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag_name.outputs.TAG_NAME }}
+        release_name: MyHS ${{ steps.tag_name.outputs.TAG_NAME }}
+        body: ${{ steps.changelog.outputs.CHANGELOG }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Windows Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/MyHS-windows-x64.exe/MyHS-windows-x64.exe
+        asset_name: MyHS-windows-x64.exe
+        asset_content_type: application/octet-stream
+
+    - name: Upload Linux Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/MyHS-linux-x64/MyHS-linux-x64
+        asset_name: MyHS-linux-x64
+        asset_content_type: application/octet-stream
+
+    - name: Upload macOS x64 Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/MyHS-macos-x64/MyHS-macos-x64
+        asset_name: MyHS-macos-x64
+        asset_content_type: application/octet-stream
+
+    - name: Upload macOS ARM64 Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/MyHS-macos-arm64/MyHS-macos-arm64
+        asset_name: MyHS-macos-arm64
+        asset_content_type: application/octet-stream
+
+  # 可选：手动触发时的通知作业
+  notify:
+    name: Notify
+    needs: [build-and-release, create-release]
+    runs-on: ubuntu-latest
+    if: always() && github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Workflow Summary
+      run: |
+        echo "## 🎉 Release Workflow Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Build Status" >> $GITHUB_STEP_SUMMARY
+        echo "- Build and Release: ${{ needs.build-and-release.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Create Release: ${{ needs.create-release.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "- Windows x64 binary" >> $GITHUB_STEP_SUMMARY
+        echo "- Linux x64 binary" >> $GITHUB_STEP_SUMMARY
+        echo "- macOS x64 binary" >> $GITHUB_STEP_SUMMARY
+        echo "- macOS ARM64 binary" >> $GITHUB_STEP_SUMMARY

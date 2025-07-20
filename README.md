@@ -22,21 +22,34 @@
 - **Tracing** - 结构化日志记录
 - **Serde** - 序列化和反序列化
 
-## 📦 安装与编译
+## 📦 安装与使用
 
-### 前置要求
+### 方式一：下载预编译二进制文件（推荐）
+
+从 [GitHub Releases](https://github.com/your-username/MyHS/releases) 页面下载对应平台的二进制文件：
+
+- **Windows**: `MyHS-windows-x64.exe`
+- **Linux**: `MyHS-linux-x64`
+- **macOS (Intel)**: `MyHS-macos-x64`
+- **macOS (Apple Silicon)**: `MyHS-macos-arm64`
+
+下载后直接运行即可，无需安装Rust环境。
+
+### 方式二：从源码编译
+
+#### 前置要求
 
 - Rust 1.70+ (推荐使用最新稳定版)
 - Cargo (Rust包管理器)
 
-### 克隆项目
+#### 克隆项目
 
 ```bash
 git clone <repository-url>
 cd MyHS
 ```
 
-### 编译项目
+#### 编译项目
 
 ```bash
 # 开发版本编译
@@ -118,6 +131,46 @@ http://127.0.0.1:[您的端口号]
 - 防止路径遍历攻击
 - 只能访问指定目录及其子目录
 - 安全的文件路径处理
+
+## 🚀 自动发布
+
+本项目配置了GitHub Actions自动化工作流，可以自动编译多平台二进制文件并发布到GitHub Releases。
+
+### 📋 支持的平台
+
+- **Windows** (x86_64)
+- **Linux** (x86_64) 
+- **macOS** (x86_64 & ARM64)
+
+### 🏷️ 创建Release版本
+
+#### 方式一：通过Git标签触发（推荐）
+
+```bash
+# 创建并推送版本标签
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+#### 方式二：手动触发
+
+1. 进入GitHub仓库页面
+2. 点击 "Actions" 标签
+3. 选择 "Release" 工作流
+4. 点击 "Run workflow" 按钮
+
+### 🔄 工作流程
+
+1. **多平台编译** - 在Windows、Linux、macOS上并行编译
+2. **二进制优化** - 自动strip和压缩二进制文件
+3. **创建Release** - 自动生成GitHub Release页面
+4. **上传文件** - 将所有平台的二进制文件上传到Release
+5. **生成说明** - 自动生成版本说明和使用指南
+
+### 📁 工作流文件
+
+- <mcfile name="release.yml" path=".github/workflows/release.yml"></mcfile> - 自动发布工作流
+- <mcfile name="rust.yml" path=".github/workflows/rust.yml"></mcfile> - 基础CI工作流
 
 ## 🔧 开发说明
 
