@@ -1,15 +1,14 @@
 use axum::{
-    extract::{Path, Query},
-    http::{StatusCode, Uri, HeaderMap, header},
+    extract::{Path, Multipart},
+    http::{StatusCode, HeaderMap, header},
     response::{Html, Response, IntoResponse},
-    routing::get,
+    routing::{get, post},
     Router,
 };
-use serde::Deserialize;
 use std::{
-    collections::HashMap,
     path::{Path as StdPath, PathBuf},
     env,
+    io::Write,
 };
 use tokio::fs;
 use tower::ServiceBuilder;
@@ -19,10 +18,6 @@ use tower_http::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[derive(Deserialize)]
-struct QueryParams {
-    path: Option<String>,
-}
 
 struct FileInfo {
     name: String,
@@ -68,6 +63,7 @@ async fn main() {
     println!("📋 功能:");
     println!("   • 目录浏览");
     println!("   • 文件下载");
+    println!("   • 文件上传");
     println!("   • 自动索引页面");
     println!("   • 文件信息显示");
     println!("\n按 Ctrl+C 停止服务器\n");
@@ -76,6 +72,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(serve_handler))
         .route("/*path", get(serve_handler))
+        .route("/upload", post(upload_handler))
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
@@ -129,7 +126,7 @@ async fn serve_handler(
 // 生成目录列表页面
 async fn generate_directory_listing(
     dir_path: &StdPath,
-    base_dir: &StdPath,
+    _base_dir: &StdPath,
     current_path: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut entries = fs::read_dir(dir_path).await?;
@@ -178,6 +175,29 @@ async fn generate_directory_listing(
             parent_path
         )
     };
+
+    // 添加文件上传表单
+    let upload_form = format!(r#"
+    <div class="upload-container">
+        <h3>📤 文件上传</h3>
+        <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+            <input type="hidden" name="current_path" value="{}">
+            <div class="upload-box">
+                <div class="file-input-container">
+                    <input type="file" id="fileInput" name="file" class="file-input" multiple>
+                    <label for="fileInput" class="file-label">选择文件</label>
+                </div>
+                <div class="file-actions">
+                    <button type="button" id="clearButton" class="clear-button" style="display:none;">清除全部</button>
+                    <button type="submit" class="upload-button">上传</button>
+                </div>
+            </div>
+            <div id="fileList" class="file-list">
+                <div class="no-files">未选中文件</div>
+            </div>
+        </form>
+    </div>
+    "#, current_path);
 
     let mut file_rows = String::new();
     
@@ -278,6 +298,140 @@ async fn generate_directory_listing(
             font-size: 0.9rem;
             background: #f8f9fa;
         }}
+        .upload-container {{
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+        }}
+        .upload-container h3 {{
+            margin-top: 0;
+            color: #495057;
+        }}
+        .upload-box {{
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 15px;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            background-color: white;
+        }}
+        .file-input-container {{
+            position: relative;
+        }}
+        .file-input {{
+            position: absolute;
+            width: 0.1px;
+            height: 0.1px;
+            opacity: 0;
+            overflow: hidden;
+            z-index: -1;
+        }}
+        .file-label {{
+            display: inline-block;
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }}
+        .file-label:hover {{
+            background-color: #0069d9;
+        }}
+        .file-actions {{
+            display: flex;
+            gap: 10px;
+        }}
+        .file-list {{
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }}
+        .no-files {{
+            padding: 15px;
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+        }}
+        .file-item {{
+            display: grid;
+            grid-template-columns: 1fr 80px 30px;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid #dee2e6;
+            transition: background-color 0.2s;
+        }}
+        .file-item:hover {{
+            background-color: #e9ecef;
+        }}
+        .file-item:last-child {{
+            border-bottom: none;
+        }}
+        .file-item-name {{
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-right: 10px;
+        }}
+        .file-item-size {{
+            color: #6c757d;
+            font-size: 0.9em;
+            text-align: right;
+            padding-right: 15px;
+        }}
+        .remove-file {{
+            background-color: #f8f9fa;
+            color: #dc3545;
+            border: 1px solid #dc3545;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: bold;
+            transition: all 0.2s;
+        }}
+        .remove-file:hover {{
+            background-color: #dc3545;
+            color: white;
+        }}
+        .clear-button {{
+            padding: 8px 16px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }}
+        .clear-button:hover {{
+            background-color: #c82333;
+        }}
+        .upload-button {{
+            padding: 8px 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }}
+        .upload-button:hover {{
+            background-color: #218838;
+        }}
     </style>
 </head>
 <body>
@@ -301,13 +455,107 @@ async fn generate_directory_listing(
                 {}
             </tbody>
         </table>
+        {}
         <div class="footer">
             <p>⚡ Rust HTTP 文件服务器 - 类似 Python http.server</p>
         </div>
     </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {{
+            const fileInput = document.getElementById('fileInput');
+            const fileList = document.getElementById('fileList');
+            const clearButton = document.getElementById('clearButton');
+            const uploadForm = document.getElementById('uploadForm');
+            
+            // 格式化文件大小
+            function formatFileSize(bytes) {{
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+            }}
+            
+            // 更新文件列表
+            function updateFileList() {{
+                fileList.innerHTML = '';
+                
+                if (fileInput.files.length === 0) {{
+                    clearButton.style.display = 'none';
+                    const noFiles = document.createElement('div');
+                    noFiles.className = 'no-files';
+                    noFiles.textContent = '未选中文件';
+                    fileList.appendChild(noFiles);
+                    return;
+                }}
+                
+                clearButton.style.display = 'inline-block';
+                
+                // 创建一个文档片段来提高性能
+                const fragment = document.createDocumentFragment();
+                
+                for (let i = 0; i < fileInput.files.length; i++) {{
+                    const file = fileInput.files[i];
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'file-item';
+                    fileItem.dataset.index = i;
+                    
+                    const fileName = document.createElement('div');
+                    fileName.className = 'file-item-name';
+                    fileName.textContent = file.name;
+                    
+                    const fileSize = document.createElement('div');
+                    fileSize.className = 'file-item-size';
+                    fileSize.textContent = formatFileSize(file.size);
+                    
+                    const removeButton = document.createElement('button');
+                    removeButton.className = 'remove-file';
+                    removeButton.textContent = '×';
+                    removeButton.type = 'button';
+                    removeButton.title = '移除文件';
+                    removeButton.addEventListener('click', function() {{
+                        removeFile(i);
+                    }});
+                    
+                    fileItem.appendChild(fileName);
+                    fileItem.appendChild(fileSize);
+                    fileItem.appendChild(removeButton);
+                    fragment.appendChild(fileItem);
+                }}
+                
+                fileList.appendChild(fragment);
+            }}
+            
+            // 移除单个文件
+            function removeFile(index) {{
+                const dt = new DataTransfer();
+                const files = fileInput.files;
+                
+                for (let i = 0; i < files.length; i++) {{
+                    if (i !== index) {{
+                        dt.items.add(files[i]);
+                    }}
+                }}
+                
+                fileInput.files = dt.files;
+                updateFileList();
+            }}
+            
+            // 监听文件选择变化
+            fileInput.addEventListener('change', function() {{
+                updateFileList();
+            }});
+            
+            // 清除所有文件
+            clearButton.addEventListener('click', function() {{
+                fileInput.value = '';
+                updateFileList();
+            }});
+        }});
+    </script>
 </body>
 </html>
-    "#, title, current_path, parent_link, file_rows))
+    "#, title, current_path, parent_link, file_rows, upload_form))
 }
 
 // 提供文件下载服务
@@ -345,6 +593,97 @@ fn format_file_size(size: u64) -> String {
         format!("{} {}", size as u64, UNITS[unit_index])
     } else {
         format!("{:.1} {}", size, UNITS[unit_index])
+    }
+}
+
+// 处理文件上传
+#[axum::debug_handler]
+async fn upload_handler(
+    axum::extract::State(base_dir): axum::extract::State<PathBuf>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let mut current_path = String::new();
+    let mut success_count = 0;
+    let mut total_files = 0;
+
+    // 首先获取当前路径
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "current_path" {
+            if let Ok(data) = field.text().await {
+                current_path = data;
+                break;
+            }
+        }
+    }
+
+    // 确定目标目录
+    let target_dir = if current_path.is_empty() {
+        base_dir.clone()
+    } else {
+        base_dir.join(&current_path)
+    };
+
+    // 安全检查：确保目标目录在基础目录内
+    if !target_dir.starts_with(&base_dir) {
+        return (StatusCode::FORBIDDEN, "访问被拒绝").into_response();
+    }
+
+    // 处理所有文件
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or_default().to_string();
+        
+        if name == "file" {
+            if let Some(file_name) = field.file_name() {
+                total_files += 1;
+                let file_name = file_name.to_string();
+                
+                if let Ok(data) = field.bytes().await {
+                    let file_path = target_dir.join(&file_name);
+                    
+                    // 写入文件
+                    match std::fs::File::create(&file_path) {
+                        Ok(mut file) => {
+                            if file.write_all(&data).is_ok() {
+                                success_count += 1;
+                            }
+                        },
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    // 上传后重定向回原目录
+    let redirect_path = if current_path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", current_path)
+    };
+
+    if success_count > 0 {
+        let message = if success_count == total_files {
+            if total_files == 1 {
+                "文件上传成功".to_string()
+            } else {
+                format!("所有{}个文件上传成功", total_files)
+            }
+        } else {
+            format!("{}个文件中的{}个上传成功", total_files, success_count)
+        };
+        
+        (
+            StatusCode::SEE_OTHER,
+            [(header::LOCATION, redirect_path)],
+            message
+        ).into_response()
+    } else {
+        (
+            StatusCode::SEE_OTHER,
+            [(header::LOCATION, redirect_path)],
+            "文件上传失败"
+        ).into_response()
     }
 }
 
