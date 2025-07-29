@@ -51,9 +51,9 @@ async fn main() {
     };
 
     let port = if args.len() > 2 {
-        args[2].parse().unwrap_or(8081)
+        args[2].parse().unwrap_or(2333)
     } else {
-        8081
+        2333
     };
 
     // 验证目录是否存在
@@ -64,7 +64,7 @@ async fn main() {
 
     println!("🌐 Python风格的HTTP文件服务器");
     println!("📁 服务目录: {}", serve_dir.display());
-    println!("🚀 服务器地址: http://127.0.0.1:{}", port);
+    println!("🚀 服务器地址: http://0.0.0.0:{}", port);
     println!("📋 功能:");
     println!("   • 目录浏览");
     println!("   • 文件下载");
@@ -83,7 +83,7 @@ async fn main() {
         )
         .with_state(serve_dir);
 
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
         .unwrap();
 
